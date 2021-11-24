@@ -521,7 +521,7 @@ func TestNewRouterEndpoint(t *testing.T) {
 		HostRewrite:      "test-svc-turing-router-1.models.example.com",
 		Gateway:          defaultGateway,
 		DestinationHost:  defaultIstioGateway,
-		MatchURIPrefixes: defaultMatchURIPrefixes, ",",
+		MatchURIPrefixes: defaultMatchURIPrefixes,
 	}
 
 	got, err := sb.NewRouterEndpoint(&routerVersion, project, "test-env", versionEndpoint)
