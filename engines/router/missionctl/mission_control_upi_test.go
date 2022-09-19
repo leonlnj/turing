@@ -64,6 +64,10 @@ func TestMain(m *testing.M) {
 // TestNewMissionControlUpi tests for the creation of missionControlGrpc and fiberLog configuration
 func TestNewMissionControlUpi(t *testing.T) {
 	fiberDebugMsg := "Time Taken"
+	testReq := testutils.GenerateUPIRequest(1, 1)
+	testReqBytes, err := proto.Marshal(testReq)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name          string
 		cfgFilePath   string
@@ -96,7 +100,7 @@ func TestNewMissionControlUpi(t *testing.T) {
 				ctx = grpc.NewContextWithServerTransportStream(ctx, mockStream)
 
 				res, err := got.Route(ctx, &fibergrpc.Request{
-					Message: []byte{},
+					Message: testReqBytes,
 				})
 				require.Nil(t, err)
 				require.NotNil(t, res)
@@ -192,9 +196,6 @@ func Test_missionControlUpi_Route_Integration(t *testing.T) {
 	require.NoError(t, err)
 	smallRequestExpected := upiv1.PredictValuesResponse{
 		PredictionResultTable: smallRequest.PredictionTable,
-		Metadata: &upiv1.ResponseMetadata{
-			PredictionId: smallRequest.Metadata.PredictionId,
-		},
 	}
 
 	largeRequest := testutils.GenerateUPIRequest(500, 500)
@@ -202,9 +203,6 @@ func Test_missionControlUpi_Route_Integration(t *testing.T) {
 	require.NoError(t, err)
 	largeRequestExpected := upiv1.PredictValuesResponse{
 		PredictionResultTable: largeRequest.PredictionTable,
-		Metadata: &upiv1.ResponseMetadata{
-			PredictionId: largeRequest.Metadata.PredictionId,
-		},
 	}
 
 	tests := []struct {
