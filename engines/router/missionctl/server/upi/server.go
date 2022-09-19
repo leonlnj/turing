@@ -1,6 +1,7 @@
 package upi
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
@@ -23,7 +24,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/proto"
 )
 
 const tracingComponentID = "grpc_handler"
@@ -40,9 +40,57 @@ func NewUPIServer(mc missionctl.MissionControlUPI) *Server {
 	}
 }
 
+// UniversalPredictionServiceServer is the server API for UniversalPredictionService service.
+// All implementations should embed UnimplementedUniversalPredictionServiceServer
+// for forward compatibility
+type UniversalPredictionServiceServer interface {
+	PredictValues(context.Context, []byte) ([]byte, error)
+}
+
+//nolint:revive
+func UniversalPredictionServiceServiceDesc(
+	srv interface{},
+	ctx context.Context,
+	dec func(interface{}) error,
+	interceptor grpc.UnaryServerInterceptor,
+) (interface{}, error) {
+
+	in := new(bytes.Buffer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UniversalPredictionServiceServer).PredictValues(ctx, in.Bytes())
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/caraml.upi.v1.UniversalPredictionService/PredictValues",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UniversalPredictionServiceServer).PredictValues(ctx, req.([]byte))
+	}
+	return interceptor(ctx, in.Bytes(), info, handler)
+}
+
+// ServiceDesc is the grpc.ServiceDesc for UniversalPredictionService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "caraml.upi.v1.UniversalPredictionService",
+	HandlerType: (*UniversalPredictionServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PredictValues",
+			Handler:    UniversalPredictionServiceServiceDesc,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "caraml/upi/v1/upi.proto",
+}
+
 func (us *Server) Run(listener net.Listener) {
-	s := grpc.NewServer()
-	upiv1.RegisterUniversalPredictionServiceServer(s, us)
+	s := grpc.NewServer(grpc.ForceServerCodec(&fibergrpc.FiberCodec{}))
+	s.RegisterService(&ServiceDesc, us)
 	reflection.Register(s)
 
 	errChan := make(chan error, 1)
@@ -71,8 +119,8 @@ func (us *Server) Run(listener net.Listener) {
 
 }
 
-func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesRequest) (
-	*upiv1.PredictValuesResponse, error) {
+func (us *Server) PredictValues(ctx context.Context, req []byte) (
+	[]byte, error) {
 	var predictionErr *errors.TuringError // Measure execution time
 	defer metrics.Glob().MeasureDurationMs(
 		metrics.TuringComponentRequestDurationMs,
@@ -114,13 +162,8 @@ func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesReq
 		}
 	}
 
-	requestByte, err := proto.Marshal(req)
-	if err != nil {
-		ctxLogger.Errorf("Could not marshal request into bytes: %v",
-			err.Error())
-	}
 	fiberRequest := &fibergrpc.Request{
-		Message:  requestByte,
+		Message:  req,
 		Metadata: md,
 	}
 	resp, predictionErr := us.getPrediction(ctx, fiberRequest)
@@ -134,7 +177,7 @@ func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesReq
 func (us *Server) getPrediction(
 	ctx context.Context,
 	fiberRequest fiber.Request) (
-	*upiv1.PredictValuesResponse, *errors.TuringError) {
+	[]byte, *errors.TuringError) {
 
 	// Create response channel to store the response from each step. 1 for route now,
 	// should be 4 when experiment engine, enricher and ensembler are added

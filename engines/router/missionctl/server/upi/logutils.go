@@ -7,14 +7,13 @@ import (
 	"github.com/caraml-dev/turing/engines/router/missionctl/errors"
 	"github.com/caraml-dev/turing/engines/router/missionctl/log"
 	"github.com/caraml-dev/turing/engines/router/missionctl/log/resultlog"
-	upiv1 "github.com/caraml-dev/universal-prediction-interface/gen/go/grpc/caraml/upi/v1"
 	"google.golang.org/grpc/metadata"
 )
 
 type grpcRouterResponse struct {
 	key    string
 	header metadata.MD
-	body   *upiv1.PredictValuesResponse
+	body   []byte
 	err    string
 }
 
@@ -35,7 +34,7 @@ func logTuringRouterRequestSummary(
 		if resp.err != "" {
 			logEntry.AddResponse(resp.key, "", nil, resp.err)
 		} else {
-			logEntry.AddResponse(resp.key, resp.body.String(), resultlog.FormatHeader(resp.header), "")
+			logEntry.AddResponse(resp.key, string(body), resultlog.FormatHeader(resp.header), "")
 		}
 	}
 
@@ -64,7 +63,7 @@ func copyResponseToLogChannel(
 	ctx context.Context,
 	ch chan<- grpcRouterResponse,
 	key string,
-	r *upiv1.PredictValuesResponse,
+	body []byte,
 	err *errors.TuringError) {
 	// if error is not nil, use error as response
 	if err != nil {
@@ -82,6 +81,6 @@ func copyResponseToLogChannel(
 	ch <- grpcRouterResponse{
 		key:    key,
 		header: md,
-		body:   r,
+		body:   body,
 	}
 }

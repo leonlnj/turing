@@ -10,10 +10,13 @@ import (
 	fiberProtocol "github.com/gojek/fiber/protocol"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 func Test_logTuringRouterRequestSummary(t *testing.T) {
 	resp := &upiv1.PredictValuesResponse{}
+	respByte, err := proto.Marshal(resp)
+	require.NoError(t, err)
 	key := "test"
 
 	tests := []struct {
@@ -25,7 +28,7 @@ func Test_logTuringRouterRequestSummary(t *testing.T) {
 			name: "ok",
 			expected: grpcRouterResponse{
 				key:  key,
-				body: resp,
+				body: respByte,
 			},
 		},
 		{
@@ -43,7 +46,7 @@ func Test_logTuringRouterRequestSummary(t *testing.T) {
 			ctx := metadata.AppendToOutgoingContext(context.Background(), "test", "key")
 			// Make response channel
 			respCh := make(chan grpcRouterResponse, 1)
-			copyResponseToLogChannel(ctx, respCh, key, resp, tt.err)
+			copyResponseToLogChannel(ctx, respCh, key, respByte, tt.err)
 
 			close(respCh)
 			data := <-respCh

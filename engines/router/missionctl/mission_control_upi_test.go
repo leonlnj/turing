@@ -162,16 +162,6 @@ func Test_missionControlUpi_Route(t *testing.T) {
 					Body:       ioutil.NopCloser(bytes.NewReader([]byte("dummy res"))),
 				})),
 		},
-		{
-			name: "error wrong response payload type",
-			expectedErr: &errors.TuringError{
-				Code:    14,
-				Message: "unable to unmarshal into expected response proto",
-			},
-			mockReturn: fiber.NewResponseQueueFromResponses(&fibergrpc.Response{
-				Message: []byte("test"),
-			}),
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,7 +175,10 @@ func Test_missionControlUpi_Route(t *testing.T) {
 			if tt.expectedErr != nil {
 				require.Equal(t, tt.expectedErr, err)
 			} else {
-				require.True(t, compareUpiResponse(got, tt.expected), "response not equal to expected")
+				responseProto := &upiv1.PredictValuesResponse{}
+				err := proto.Unmarshal(got, responseProto)
+				require.NoError(t, err)
+				require.True(t, compareUpiResponse(responseProto, tt.expected), "response not equal to expected")
 			}
 		})
 	}
@@ -197,12 +190,22 @@ func Test_missionControlUpi_Route_Integration(t *testing.T) {
 	smallRequest := testutils.GenerateUPIRequest(5, 5)
 	smallRequestByte, err := proto.Marshal(smallRequest)
 	require.NoError(t, err)
-	smallRequestExpected := upiv1.PredictValuesResponse{PredictionResultTable: smallRequest.PredictionTable}
+	smallRequestExpected := upiv1.PredictValuesResponse{
+		PredictionResultTable: smallRequest.PredictionTable,
+		Metadata: &upiv1.ResponseMetadata{
+			PredictionId: smallRequest.Metadata.PredictionId,
+		},
+	}
 
 	largeRequest := testutils.GenerateUPIRequest(500, 500)
 	largeRequestByte, err := proto.Marshal(largeRequest)
 	require.NoError(t, err)
-	largeRequestExpected := upiv1.PredictValuesResponse{PredictionResultTable: largeRequest.PredictionTable}
+	largeRequestExpected := upiv1.PredictValuesResponse{
+		PredictionResultTable: largeRequest.PredictionTable,
+		Metadata: &upiv1.ResponseMetadata{
+			PredictionId: largeRequest.Metadata.PredictionId,
+		},
+	}
 
 	tests := []struct {
 		name           string
@@ -237,7 +240,10 @@ func Test_missionControlUpi_Route_Integration(t *testing.T) {
 			ctx = grpc.NewContextWithServerTransportStream(ctx, mockStream)
 			got, err := mc.Route(ctx, tt.request)
 			require.Nil(t, err)
-			diff := compareUpiResponse(got, tt.compareAgainst)
+			responseProto := &upiv1.PredictValuesResponse{}
+			err = proto.Unmarshal(got, responseProto)
+			require.NoError(t, err)
+			diff := compareUpiResponse(responseProto, tt.compareAgainst)
 			require.Equal(t, tt.expectedEqual, diff, "Comparison result not expected")
 		})
 	}
