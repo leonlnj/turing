@@ -45,10 +45,11 @@ type UniversalPredictionServiceServer interface {
 	PredictValues(context.Context, []byte) ([]byte, error)
 }
 
-//nolint:revive,gofmt
+//nolint:revive,gofmt,goimports
 // UniversalPredictionServiceServiceDesc implement grpc internal methodHandler interface, it creates an io.writer
 // and expect the codec to write bytes into the input instead of the typical proto request.
-// Nolint is used as context cannot be changed to first argument in order to fit the interface.
+// Nolint is used as context cannot be changed to first argument in order to fit the interface and there are
+// other bugs on fmt and imports while using nolint
 func UniversalPredictionServiceServiceDesc(
 	srv interface{},
 	ctx context.Context,
