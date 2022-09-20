@@ -17,7 +17,6 @@ import (
 	"github.com/caraml-dev/turing/engines/router/missionctl/log/resultlog"
 	"github.com/caraml-dev/turing/engines/router/missionctl/server/constant"
 	"github.com/caraml-dev/turing/engines/router/missionctl/turingctx"
-	upiv1 "github.com/caraml-dev/universal-prediction-interface/gen/go/grpc/caraml/upi/v1"
 	"github.com/gojek/fiber"
 	fibergrpc "github.com/gojek/fiber/grpc"
 	"github.com/opentracing/opentracing-go"
@@ -29,8 +28,6 @@ import (
 const tracingComponentID = "grpc_handler"
 
 type Server struct {
-	upiv1.UnimplementedUniversalPredictionServiceServer
-
 	missionControl missionctl.MissionControlUPI
 }
 
@@ -40,13 +37,18 @@ func NewUPIServer(mc missionctl.MissionControlUPI) *Server {
 	}
 }
 
-// UniversalPredictionServiceServer is the server API for UniversalPredictionService service.
-// All implementations should embed UnimplementedUniversalPredictionServiceServer
-// for forward compatibility
+// UniversalPredictionServiceServer is the internal server that communicates in bytes
+// It requires the codec to be passing []byte instead of a proto object. It is registered
+// the same way as the generated proto which has the following interface instead.
+// PredictValues(context.Context, *PredictValuesRequest) (*PredictValuesResponse, error)
 type UniversalPredictionServiceServer interface {
 	PredictValues(context.Context, []byte) ([]byte, error)
 }
 
+// UniversalPredictionServiceServiceDesc implement grpc internal methodHandler interface
+// which creates an io.writer and expect the codec to write bytes into the input instead
+// of the typical proto request. Nolint is used as context cannot be changed to first argument
+// in order to fit the interface.
 //nolint:revive
 func UniversalPredictionServiceServiceDesc(
 	srv interface{},
@@ -54,7 +56,6 @@ func UniversalPredictionServiceServiceDesc(
 	dec func(interface{}) error,
 	interceptor grpc.UnaryServerInterceptor,
 ) (interface{}, error) {
-
 	in := new(bytes.Buffer)
 	if err := dec(in); err != nil {
 		return nil, err
@@ -73,8 +74,11 @@ func UniversalPredictionServiceServiceDesc(
 }
 
 // ServiceDesc is the grpc.ServiceDesc for UniversalPredictionService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
+// It is and must register the same service as per the generated proto, in order
+// for client to recognize it. However underlying it this is using a different handler
+// which uses and expects bytes input instead of the proto message. Any form of validation
+// of the input/output proto while calling this service is lost due to the byte message not
+// being decoded or encoded by Turing at any point.
 var ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "caraml.upi.v1.UniversalPredictionService",
 	HandlerType: (*UniversalPredictionServiceServer)(nil),
@@ -89,6 +93,9 @@ var ServiceDesc = grpc.ServiceDesc{
 }
 
 func (us *Server) Run(listener net.Listener) {
+	// ForceServerCodec is experimental API and fiber codec is used to
+	// work with the server internal implementation to receive bytes without (un)marshalling to
+	// minimize overhead while losing validation of the proto message.
 	s := grpc.NewServer(grpc.ForceServerCodec(&fibergrpc.FiberCodec{}))
 	s.RegisterService(&ServiceDesc, us)
 	reflection.Register(s)
