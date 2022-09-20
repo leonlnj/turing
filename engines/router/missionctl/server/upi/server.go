@@ -45,7 +45,7 @@ type UniversalPredictionServiceServer interface {
 	PredictValues(context.Context, []byte) ([]byte, error)
 }
 
-//nolint:revive
+//nolint:all
 // UniversalPredictionServiceServiceDesc implement grpc internal methodHandler interface, it creates an io.writer
 // and expect the codec to write bytes into the input instead of the typical proto request.
 // Nolint is used as context cannot be changed to first argument in order to fit the interface.
