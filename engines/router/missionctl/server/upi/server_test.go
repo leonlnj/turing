@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/protobuf/proto"
 )
 
 var mockResponse = &upiv1.PredictValuesResponse{
@@ -30,20 +31,23 @@ var mockResponse = &upiv1.PredictValuesResponse{
 }
 
 func TestUPIServer_PredictValues(t *testing.T) {
+	mockResponseBytes, err := proto.Marshal(mockResponse)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name        string
-		request     *upiv1.PredictValuesRequest
+		request     []byte
 		expected    *upiv1.PredictValuesResponse
 		expectedErr *errors.TuringError
-		mockReturn  func() (*upiv1.PredictValuesResponse, *errors.TuringError)
+		mockReturn  func() ([]byte, *errors.TuringError)
 	}{
 		{
 			name:        "ok",
 			request:     nil,
 			expected:    mockResponse,
 			expectedErr: nil,
-			mockReturn: func() (*upiv1.PredictValuesResponse, *errors.TuringError) {
-				return mockResponse, nil
+			mockReturn: func() ([]byte, *errors.TuringError) {
+				return mockResponseBytes, nil
 			},
 		},
 		{
@@ -53,7 +57,7 @@ func TestUPIServer_PredictValues(t *testing.T) {
 				Code:    14,
 				Message: "did not get back a valid response from the fiberHandler",
 			},
-			mockReturn: func() (*upiv1.PredictValuesResponse, *errors.TuringError) {
+			mockReturn: func() ([]byte, *errors.TuringError) {
 				return nil, &errors.TuringError{
 					Code:    14,
 					Message: "did not get back a valid response from the fiberHandler",
@@ -70,9 +74,12 @@ func TestUPIServer_PredictValues(t *testing.T) {
 			ctx := context.Background()
 			resp, err := upiServer.PredictValues(ctx, tt.request)
 			if tt.expectedErr != nil {
-				require.Equal(t, err, tt.expectedErr)
+				require.Equal(t, tt.expectedErr, err)
 			} else {
-				require.Equal(t, resp, tt.expected)
+				r := &upiv1.PredictValuesResponse{}
+				err := proto.Unmarshal(resp, r)
+				require.NoError(t, err)
+				require.Equal(t, tt.expected.String(), r.String())
 			}
 		})
 	}

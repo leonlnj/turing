@@ -1,6 +1,7 @@
 package upi
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
@@ -16,21 +17,17 @@ import (
 	"github.com/caraml-dev/turing/engines/router/missionctl/log/resultlog"
 	"github.com/caraml-dev/turing/engines/router/missionctl/server/constant"
 	"github.com/caraml-dev/turing/engines/router/missionctl/turingctx"
-	upiv1 "github.com/caraml-dev/universal-prediction-interface/gen/go/grpc/caraml/upi/v1"
 	"github.com/gojek/fiber"
 	fibergrpc "github.com/gojek/fiber/grpc"
 	"github.com/opentracing/opentracing-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/proto"
 )
 
 const tracingComponentID = "grpc_handler"
 
 type Server struct {
-	upiv1.UnimplementedUniversalPredictionServiceServer
-
 	missionControl missionctl.MissionControlUPI
 }
 
@@ -40,9 +37,67 @@ func NewUPIServer(mc missionctl.MissionControlUPI) *Server {
 	}
 }
 
+// UniversalPredictionServiceServer is the internal server that communicates in bytes
+// It requires the codec to be passing []byte instead of a proto object. It is registered
+// the same way as the generated proto which has the following interface instead.
+// PredictValues(context.Context, *PredictValuesRequest) (*PredictValuesResponse, error)
+type UniversalPredictionServiceServer interface {
+	PredictValues(context.Context, []byte) ([]byte, error)
+}
+
+//nolint:revive,gofmt,goimports
+// UniversalPredictionServiceServiceDesc implement grpc internal methodHandler interface, it creates an io.writer
+// and expect the codec to write bytes into the input instead of the typical proto request.
+// Nolint is used as context cannot be changed to first argument in order to fit the interface and there are
+// other bugs on fmt and imports while using nolint
+func UniversalPredictionServiceServiceDesc(
+	srv interface{},
+	ctx context.Context,
+	dec func(interface{}) error,
+	interceptor grpc.UnaryServerInterceptor,
+) (interface{}, error) {
+	in := new(bytes.Buffer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UniversalPredictionServiceServer).PredictValues(ctx, in.Bytes())
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/caraml.upi.v1.UniversalPredictionService/PredictValues",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UniversalPredictionServiceServer).PredictValues(ctx, req.([]byte))
+	}
+	return interceptor(ctx, in.Bytes(), info, handler)
+}
+
+// ServiceDesc is the grpc.ServiceDesc for UniversalPredictionService service.
+// It is and must register the same service as per the generated proto, in order
+// for client to recognize it. However underlying it this is using a different handler
+// which uses and expects bytes input instead of the proto message. Any form of validation
+// of the input/output proto while calling this service is lost due to the byte message not
+// being decoded or encoded by Turing at any point.
+var ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "caraml.upi.v1.UniversalPredictionService",
+	HandlerType: (*UniversalPredictionServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PredictValues",
+			Handler:    UniversalPredictionServiceServiceDesc,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "caraml/upi/v1/upi.proto",
+}
+
 func (us *Server) Run(listener net.Listener) {
-	s := grpc.NewServer()
-	upiv1.RegisterUniversalPredictionServiceServer(s, us)
+	// ForceServerCodec is experimental API and fiber codec is used to
+	// work with the server internal implementation to receive bytes without (un)marshalling to
+	// minimize overhead while losing validation of the proto message.
+	s := grpc.NewServer(grpc.ForceServerCodec(&fibergrpc.FiberCodec{}))
+	s.RegisterService(&ServiceDesc, us)
 	reflection.Register(s)
 
 	errChan := make(chan error, 1)
@@ -71,8 +126,8 @@ func (us *Server) Run(listener net.Listener) {
 
 }
 
-func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesRequest) (
-	*upiv1.PredictValuesResponse, error) {
+func (us *Server) PredictValues(ctx context.Context, req []byte) (
+	[]byte, error) {
 	var predictionErr *errors.TuringError // Measure execution time
 	defer metrics.Glob().MeasureDurationMs(
 		metrics.TuringComponentRequestDurationMs,
@@ -114,13 +169,8 @@ func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesReq
 		}
 	}
 
-	requestByte, err := proto.Marshal(req)
-	if err != nil {
-		ctxLogger.Errorf("Could not marshal request into bytes: %v",
-			err.Error())
-	}
 	fiberRequest := &fibergrpc.Request{
-		Message:  requestByte,
+		Message:  req,
 		Metadata: md,
 	}
 	resp, predictionErr := us.getPrediction(ctx, fiberRequest)
@@ -134,7 +184,7 @@ func (us *Server) PredictValues(ctx context.Context, req *upiv1.PredictValuesReq
 func (us *Server) getPrediction(
 	ctx context.Context,
 	fiberRequest fiber.Request) (
-	*upiv1.PredictValuesResponse, *errors.TuringError) {
+	[]byte, *errors.TuringError) {
 
 	// Create response channel to store the response from each step. 1 for route now,
 	// should be 4 when experiment engine, enricher and ensembler are added
