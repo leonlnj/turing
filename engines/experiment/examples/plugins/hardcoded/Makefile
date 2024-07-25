@@ -14,7 +14,7 @@ vendor:
 	go mod vendor
 
 .PHONY: build-image
-build-image: vendor
+build-image: tidy vendor
 	@$(eval IMAGE_TAG = $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY)/,)${PLUGIN_NAME}-engine-plugin:${VERSION})
 	@echo "Building docker image: ${IMAGE_TAG}"
 	docker build --tag ${IMAGE_TAG} .
