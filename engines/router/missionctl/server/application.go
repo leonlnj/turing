@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/pprof"
 
 	// import pprof
 	_ "net/http/pprof"
@@ -119,6 +120,13 @@ func Run() {
 		if cfg.AppConfig.CustomMetrics {
 			http.Handle("/metrics", promhttp.Handler())
 		}
+		http.HandleFunc("/v1/pprof/", pprof.Index)
+		http.HandleFunc("/v1/pprof/cmdline", pprof.Cmdline)
+		http.HandleFunc("/v1/pprof/profile", pprof.Profile)
+		http.HandleFunc("/v1/pprof/symbol", pprof.Symbol)
+		http.HandleFunc("/v1/pprof/trace", pprof.Trace)
+		log.Glob().Info("pprof handlers registered")
+
 		// Serve
 		log.Glob().Infof("listening at port %d", cfg.Port)
 		if err := http.ListenAndServe(cfg.ListenAddress(), http.DefaultServeMux); err != nil {
